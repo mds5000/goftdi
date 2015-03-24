@@ -12,24 +12,56 @@ type DeviceInfo struct {
 	handle unsafe.Pointer
 }
 
+// Search the system for all connected FTDI devices.
+// Returns a slice of `DeviceInfo` objects for each.
 func GetDeviceList() []DeviceInfo {}
 
-func Open(*DeviceInfo) *Device {}
+// Open the device described by DeviceInfo
+func Open(di *DeviceInfo) *Device, error {}
 
-// Implements ReadWriteCloser
+// Close the device
+// Return nil on success, error otherwise.
 func (d *Device) Close() error {}
+
+// Read from the device. Implements io.Reader.
 func (d *Device) Read([]byte) int, error {}
+// Write to the device. Implements io.Writer.
 func (d *Device) Write([]byte) int, error {}
-func (d *Device) SetBaudrate(int) {}
-func (d *Device) SetBitmode() {}
-func (d *Device) SetFlowControl() {}
+
+// Set the baudrate/bitrate in bits-per-second.
+// Return nil on success, error otherwise.
+func (d *Device) SetBaudrate(baud uint) error {}
+
+// Set the device's bit mode.
+func (d *Device) SetBitMode(mode BitMode) error {}
+func (d *Device) SetFlowControl() error{}
 func (d *Device) SetLatency() {}
 func (d *Device) SetLineProperty() {}
 func (d *Device) SetTimeout() {}
 func (d *Device) SetTransferSize() {}
-func (d *Device) Reset() {}
+func (d *Device) SetChars() {}
+
+// Reset the device. Returns nil on success,
+// error otherwise.
+func (d *Device) Reset() error {}
+func (d *Device) Purge() error {}
+
+
+// Others...
+func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {}
 
 
 
-type MpsseDevice struct {}
-func
+type MPSSEDevice uintptr
+
+func (m MPSSEDevice) Initialize(device) (*)
+func (m MPSSEDevice) SetGPIO(device) (*)
+func (m MPSSEDevice) ReadGPIO(device) (*)
+func (m MPSSEDevice) WriteGPIO(device) (*)
+
+func (m MPSSEDevice) SetMode(device) (*)
+func (m MPSSEDevice) SetClk(device) (*)
+func (m MPSSEDevice) Write(device) (*)
+func (m MPSSEDevice) Read(device) (*)
+func (m MPSSEDevice) Close(device) (*)
+
