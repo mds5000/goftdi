@@ -1,55 +1,39 @@
 package main
 
 import "fmt"
-import "bytes"
 import "errors"
 import "unsafe"
 
-// #cgo CFLAGS: -I/usr/local/Cellar/libftdi/1.1/include/libftdi1/
-// #cgo LDFLAGS: -lftdi1 -L/usr/local/Cellar/libftdi/1.1/lib/
+// If installed on OSX using 'brew'
+// ;;#cgo CFLAGS: -I/usr/local/Cellar/libftdi/1.1/include/libftdi1/
+// ;;#cgo LDFLAGS: -lftdi1 -L/usr/local/Cellar/libftdi/1.1/lib/
+
+// #cgo pkg-config: libftdi
 // #include <ftdi.h>
 import "C"
 
 // Return Library version, formatted to match D2XX
 func GetLibraryVersion() uint32 {
-	v := C.ftdi_get_library_version()
-	return uint32(v.major&0xFF<<16 +
-		v.minor&0xFF<<8 +
-		v.micro&0xFF)
+	//v := C.ftdi_get_library_version()
+	//return uint32(v.major&0xFF<<16 +
+	//	v.minor&0xFF<<8 +
+	//	v.micro&0xFF)
+
+	// Not implemented, so we assume version 0.19.0
+	return 0x001900
 }
 
-// Return the number of connected FTDI USB devices
-func CreateDeviceInfoList() (n int64, e error) {
-	ctx := C.ftdi_new()
-	defer C.ftdi_free(ctx)
-	if ctx == nil {
-		return 0, errors.New("Failed to create FTDI context")
-	}
-
-	var dev_list *C.struct_ftdi_device_list
-	defer C.ftdi_list_free(&dev_list)
-
-	num := C.ftdi_usb_find_all(ctx, &dev_list, 0, 0)
-	if num < 0 {
-		return 0, getErr(ctx)
-	}
-
-	return int64(num), nil
-}
-
-type DeviceDescriptor struct {
+type DeviceInfo struct {
 	index         uint64
-	flags         uint64 // not used in linux
-	dtype         uint64 // not used in linux
-	id            uint64 // not used
-	location      uint64 // not used
+	id            uint32 // used as interface number
 	serial_number string
 	description   string
-	handle        uintptr // the libusb device pointer
+	manufacturer  string
+	handle        unsafe.Pointer // the libusb device pointer
 }
 
-// Return a description of the USB device
-func GetDeviceInfoDetail(index uint32) (descriptor *DeviceDescriptor, e error) {
+//TODO: Need to expand multi-interface devices, and then to other FTDI chips
+func GetDeviceList() (dl []DeviceInfo, e error) {
 	ctx := C.ftdi_new()
 	defer C.ftdi_free(ctx)
 	if ctx == nil {
@@ -59,61 +43,212 @@ func GetDeviceInfoDetail(index uint32) (descriptor *DeviceDescriptor, e error) {
 	var dev_list *C.struct_ftdi_device_list
 	defer C.ftdi_list_free(&dev_list)
 
-	num := C.ftdi_usb_find_all(ctx, &dev_list, 0, 0)
+	num := C.ftdi_usb_find_all(ctx, &dev_list, 0x0403, 0x6011)
 	if num < 0 {
 		return nil, getErr(ctx)
 	}
 
-	// walk through the linked list
-	for i := uint32(0); i < index; i++ {
+	dl = make([]DeviceInfo, num*4)
+
+	for i := 0; i < int(num); i++ {
+
+		const CHAR_SZ = 64
+		var mnf_char, desc_char, ser_char [CHAR_SZ]C.char
+
+		ret := C.ftdi_usb_get_strings(ctx, dev_list.dev,
+			(*C.char)(&mnf_char[0]), CHAR_SZ,
+			(*C.char)(&desc_char[0]), CHAR_SZ,
+			(*C.char)(&ser_char[0]), CHAR_SZ)
+		if ret != 0 {
+			return nil, getErr(ctx)
+		}
+
+		var d DeviceInfo
+		d.handle = unsafe.Pointer(dev_list.dev)
+		d.manufacturer = C.GoString(&mnf_char[0])
+
+		for j, intrfce := range []string{"A", "B", "C", "D"} {
+			d.index = uint64(i*4 + j)
+			d.id = uint32(j)
+			d.description = C.GoString(&desc_char[0]) + " " + intrfce
+			d.serial_number = C.GoString(&ser_char[0]) + intrfce
+			dl[d.index] = d
+		}
 		dev_list = dev_list.next
 	}
 
-	const CHAR_SZ = 256
-	var mnf_char, desc_char, ser_char [CHAR_SZ]C.char
+	return dl, nil
+}
 
-	ret := C.ftdi_usb_get_strings(ctx, dev_list.dev,
-		(*C.char)(&mnf_char[0]), CHAR_SZ,
-		(*C.char)(&desc_char[0]), CHAR_SZ,
-		(*C.char)(&ser_char[0]), CHAR_SZ)
-	if ret > 0 {
-		return nil, getErr(ctx)
+type Device struct {
+	ctx *C.struct_ftdi_context
+}
+
+func Open(di DeviceInfo) (d *Device, e error) {
+	ctx := C.ftdi_new()
+	if ctx == nil {
+		C.ftdi_free(ctx)
+		return d, errors.New("Failed to create FTDI context")
 	}
 
-	d := &DeviceDescriptor{}
-	d.handle = uintptr(unsafe.Pointer(dev_list.dev))
-	d.index = uint64(index)
-	//d.manufacturer = C.GoString(&mnf_char[0])
-	d.description = C.GoString(&desc_char[0])
-	d.serial_number = C.GoString(&ser_char[0])
+	if ret := C.ftdi_usb_open_dev(ctx, (*C.struct_usb_device)(di.handle)); ret != 0 {
+		C.ftdi_free(ctx)
+		return d, getErr(ctx)
+	}
 
-	return d, nil
+	if ret := C.ftdi_set_interface(ctx, di.id); ret != 0 {
+		C.ftdi_free(ctx)
+		return d, getErr(ctx)
+	}
+
+	return &Device{ctx}, nil
 }
 
-//
-func Open(index uint32) (handle uintptr, e error) {
+func (d *Device) Close() (e error) {
+	defer C.ftdi_free(d.ctx)
+	if ret := C.ftdi_usb_close(d.ctx); ret != 0 {
+		return getErr(d.ctx)
+	}
+	return nil
 }
 
-func Close(handle uintptr) (e error) {
+func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
+	return 0, 0, 0, errors.New("Not Implemented")
 }
 
-/*
-func GetStatus(handle uintptr) (rx_queue, tx_queue, events int32, e error) {
+func (d *Device) Read(p []byte) (n int, e error) {
+	if ret := C.ftdi_read_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p))); ret < 0 {
+		return 0, getErr(d.ctx)
+	}
+	return 0, nil
 }
 
-func Read(handle uintptr, bytesToRead uint32) (b []byte, e error) {
+func (d *Device) Write(p []byte) (n int, e error) {
+	if ret := C.ftdi_write_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p))); ret < 0 {
+		return 0, getErr(d.ctx)
+	}
+	return 0, nil
 }
 
-func Write(handle uintptr, b []byte) (e error) {
+func (d *Device) SetBaudRate(baud uint) (e error) {
+	if ret := C.ftdi_set_baudrate(d.ctx, C.int(baud)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
 }
 
-func SetBaudRate(handle uintptr, baud uint32) (e error) {
+func (d *Device) SetChars(event, err byte) (e error) {
+	if ret := C.ftdi_set_event_char(d.ctx, C.uchar(event), C.uchar(event)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	if ret := C.ftdi_set_error_char(d.ctx, C.uchar(err), C.uchar(err)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
 }
-*/
 
-func bytesToString(b []byte) string {
-	n := bytes.Index(b, []byte{0})
-	return string(b[:n])
+type BitMode byte
+
+const (
+	RESET         BitMode = 0x00
+	ASYNC_BITBANG         = 0x01
+	MPSSE                 = 0x02
+	SYNC_BITBANG          = 0x04
+	HOST_EMU              = 0x08
+	FAST_OPTO             = 0x10
+	CBUS_BITBANG          = 0x20
+	SYNCHRONOUS           = 0x40
+)
+
+func (d *Device) SetBitMode(mode BitMode) (e error) {
+	const mask = 0x00
+	if ret := C.ftdi_set_bitmode(d.ctx, mask, C.uchar(mode)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+type FlowControl uint16
+
+const (
+	DISABLED = 0x0000
+	RTS_CTS  = 0x0100
+	DTR_DSR  = 0x0200
+	XON_XOFF = 0x0400
+)
+
+func (d *Device) SetFlowControl(f FlowControl) (e error) {
+	if ret := C.ftdi_setflowctrl(d.ctx, C.int(f)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+func (d *Device) SetLatency(latency int) (e error) {
+	if ret := C.ftdi_set_latency_timer(d.ctx, C.uchar(latency)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+func (d *Device) SetTransferSize(read_size, write_size int) (e error) {
+	if ret := C.ftdi_read_data_set_chunksize(d.ctx, C.uint(read_size)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	if ret := C.ftdi_write_data_set_chunksize(d.ctx, C.uint(write_size)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+type LineProperties struct {
+	Bits     bitsPerWord
+	StopBits stopBits
+	Parity   parity
+}
+type bitsPerWord byte
+type stopBits byte
+type parity byte
+
+const (
+	BITS_8       bitsPerWord = 8
+	BIST_7       bitsPerWord = 7
+	STOP_1       stopBits    = 0
+	STOP_2       stopBits    = 2
+	NO_PARITY    parity      = 0
+	ODD_PARITY   parity      = 1
+	EVEN_PARITY  parity      = 2
+	MARK_PARITY  parity      = 3
+	SPACE_PARITY parity      = 4
+)
+
+func (d *Device) SetLineProperty(props LineProperties) (e error) {
+	if ret := C.ftdi_set_line_property(d.ctx,
+		uint32(props.Bits),
+		uint32(props.StopBits),
+		uint32(props.Parity)); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+func (d *Device) SetTimeout(read_timeout, write_timeout int) (e error) {
+	// NOP
+	return nil
+}
+
+func (d *Device) Reset() (e error) {
+	if ret := C.ftdi_usb_reset(d.ctx); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
+}
+
+func (d *Device) Purge() (e error) {
+	if ret := C.ftdi_usb_purge_buffers(d.ctx); ret < 0 {
+		return getErr(d.ctx)
+	}
+	return nil
 }
 
 func getErr(ctx *C.struct_ftdi_context) error {
@@ -123,9 +258,17 @@ func getErr(ctx *C.struct_ftdi_context) error {
 func main() {
 
 	fmt.Printf("%X", GetLibraryVersion())
-	n, err := CreateDeviceInfoList()
-	fmt.Println("Num:", n, err)
 
-	d, err := GetDeviceInfoDetail(0)
+	d, err := GetDeviceList()
 	fmt.Println("Info:", d, err)
+
+	dev, _ := Open(d[0])
+	rx, tx, ev, _ := dev.GetStatus()
+	fmt.Println(rx, tx, ev, dev)
+	dev.SetBaudRate(912600)
+	msg := make([]byte, 1000, 1000)
+	dev.Write(msg)
+	rx, tx, ev, _ = dev.GetStatus()
+	fmt.Println(rx, tx, ev, dev)
+	dev.Close()
 }
