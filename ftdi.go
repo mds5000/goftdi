@@ -1,17 +1,49 @@
+package ftdi
 
-// The real API
+type BitMode byte
 
-type DeviceInfo struct {
-	index uint64
-	flags uint64
-	dtype uint64
-	id    uint64
-	location uint64
-	serial_number string
-	description string
-	handle unsafe.Pointer
+const (
+	RESET         BitMode = 0x00
+	ASYNC_BITBANG         = 0x01
+	MPSSE                 = 0x02
+	SYNC_BITBANG          = 0x04
+	HOST_EMU              = 0x08
+	FAST_OPTO             = 0x10
+	CBUS_BITBANG          = 0x20
+	SYNCHRONOUS           = 0x40
+)
+
+type FlowControl uint16
+
+const (
+	DISABLED FlowControl = 0x0000
+	RTS_CTS              = 0x0100
+	DTR_DSR              = 0x0200
+	XON_XOFF             = 0x0400
+)
+
+type LineProperties struct {
+	Bits     bitsPerWord
+	StopBits stopBits
+	Parity   parity
 }
+type bitsPerWord byte
+type stopBits byte
+type parity byte
 
+const (
+	BITS_8 bitsPerWord = 8
+	BIST_7 bitsPerWord = 7
+	STOP_1 stopBits    = 0
+	STOP_2 stopBits    = 2
+	NONE   parity      = 0
+	ODD    parity      = 1
+	EVEN   parity      = 2
+	MARK   parity      = 3
+	SPACE  parity      = 4
+)
+
+/* API
 // Search the system for all connected FTDI devices.
 // Returns a slice of `DeviceInfo` objects for each.
 func GetDeviceList() []DeviceInfo {}
@@ -45,23 +77,4 @@ func (d *Device) SetChars() {}
 // error otherwise.
 func (d *Device) Reset() error {}
 func (d *Device) Purge() error {}
-
-
-// Others...
-func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {}
-
-
-
-type MPSSEDevice uintptr
-
-func (m MPSSEDevice) Initialize(device) (*)
-func (m MPSSEDevice) SetGPIO(device) (*)
-func (m MPSSEDevice) ReadGPIO(device) (*)
-func (m MPSSEDevice) WriteGPIO(device) (*)
-
-func (m MPSSEDevice) SetMode(device) (*)
-func (m MPSSEDevice) SetClk(device) (*)
-func (m MPSSEDevice) Write(device) (*)
-func (m MPSSEDevice) Read(device) (*)
-func (m MPSSEDevice) Close(device) (*)
-
+*/

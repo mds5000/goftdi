@@ -1,6 +1,5 @@
-package main
+package ftdi
 
-import "fmt"
 import "errors"
 import "unsafe"
 
@@ -117,17 +116,19 @@ func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
 }
 
 func (d *Device) Read(p []byte) (n int, e error) {
-	if ret := C.ftdi_read_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p))); ret < 0 {
+	ret := C.ftdi_read_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p)))
+	if ret < 0 {
 		return 0, getErr(d.ctx)
 	}
-	return 0, nil
+	return int(ret), nil
 }
 
 func (d *Device) Write(p []byte) (n int, e error) {
-	if ret := C.ftdi_write_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p))); ret < 0 {
+	ret := C.ftdi_write_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p)))
+	if ret < 0 {
 		return 0, getErr(d.ctx)
 	}
-	return 0, nil
+	return int(ret), nil
 }
 
 func (d *Device) SetBaudRate(baud uint) (e error) {
@@ -147,19 +148,6 @@ func (d *Device) SetChars(event, err byte) (e error) {
 	return nil
 }
 
-type BitMode byte
-
-const (
-	RESET         BitMode = 0x00
-	ASYNC_BITBANG         = 0x01
-	MPSSE                 = 0x02
-	SYNC_BITBANG          = 0x04
-	HOST_EMU              = 0x08
-	FAST_OPTO             = 0x10
-	CBUS_BITBANG          = 0x20
-	SYNCHRONOUS           = 0x40
-)
-
 func (d *Device) SetBitMode(mode BitMode) (e error) {
 	const mask = 0x00
 	if ret := C.ftdi_set_bitmode(d.ctx, mask, C.uchar(mode)); ret < 0 {
@@ -167,15 +155,6 @@ func (d *Device) SetBitMode(mode BitMode) (e error) {
 	}
 	return nil
 }
-
-type FlowControl uint16
-
-const (
-	DISABLED = 0x0000
-	RTS_CTS  = 0x0100
-	DTR_DSR  = 0x0200
-	XON_XOFF = 0x0400
-)
 
 func (d *Device) SetFlowControl(f FlowControl) (e error) {
 	if ret := C.ftdi_setflowctrl(d.ctx, C.int(f)); ret < 0 {
@@ -200,27 +179,6 @@ func (d *Device) SetTransferSize(read_size, write_size int) (e error) {
 	}
 	return nil
 }
-
-type LineProperties struct {
-	Bits     bitsPerWord
-	StopBits stopBits
-	Parity   parity
-}
-type bitsPerWord byte
-type stopBits byte
-type parity byte
-
-const (
-	BITS_8       bitsPerWord = 8
-	BIST_7       bitsPerWord = 7
-	STOP_1       stopBits    = 0
-	STOP_2       stopBits    = 2
-	NO_PARITY    parity      = 0
-	ODD_PARITY   parity      = 1
-	EVEN_PARITY  parity      = 2
-	MARK_PARITY  parity      = 3
-	SPACE_PARITY parity      = 4
-)
 
 func (d *Device) SetLineProperty(props LineProperties) (e error) {
 	if ret := C.ftdi_set_line_property(d.ctx,
@@ -253,22 +211,4 @@ func (d *Device) Purge() (e error) {
 
 func getErr(ctx *C.struct_ftdi_context) error {
 	return errors.New(C.GoString(C.ftdi_get_error_string(ctx)))
-}
-
-func main() {
-
-	fmt.Printf("%X", GetLibraryVersion())
-
-	d, err := GetDeviceList()
-	fmt.Println("Info:", d, err)
-
-	dev, _ := Open(d[0])
-	rx, tx, ev, _ := dev.GetStatus()
-	fmt.Println(rx, tx, ev, dev)
-	dev.SetBaudRate(912600)
-	msg := make([]byte, 1000, 1000)
-	dev.Write(msg)
-	rx, tx, ev, _ = dev.GetStatus()
-	fmt.Println(rx, tx, ev, dev)
-	dev.Close()
 }
