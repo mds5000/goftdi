@@ -68,7 +68,7 @@ func GetDeviceList() (dl []DeviceInfo, e error) {
 
 		for j, intrfce := range []string{"A", "B", "C", "D"} {
 			d.index = uint64(i*4 + j)
-			d.id = uint32(j)
+			d.id = uint32(j + 1)
 			d.description = C.GoString(&desc_char[0]) + " " + intrfce
 			d.serial_number = C.GoString(&ser_char[0]) + intrfce
 			dl[d.index] = d
