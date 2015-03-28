@@ -90,12 +90,12 @@ func Open(di DeviceInfo) (d *Device, e error) {
 		return d, errors.New("Failed to create FTDI context")
 	}
 
-	if ret := C.ftdi_usb_open_dev(ctx, (*C.struct_usb_device)(di.handle)); ret != 0 {
+	if ret := C.ftdi_set_interface(ctx, di.id); ret != 0 {
 		C.ftdi_free(ctx)
 		return d, getErr(ctx)
 	}
 
-	if ret := C.ftdi_set_interface(ctx, di.id); ret != 0 {
+	if ret := C.ftdi_usb_open_dev(ctx, (*C.struct_usb_device)(di.handle)); ret != 0 {
 		C.ftdi_free(ctx)
 		return d, getErr(ctx)
 	}
