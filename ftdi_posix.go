@@ -2,6 +2,8 @@ package ftdi
 
 import "errors"
 import "unsafe"
+import "sync"
+import "io"
 
 // If installed on OSX using 'brew'
 // ;;#cgo CFLAGS: -I/usr/local/Cellar/libftdi/1.1/include/libftdi1/
@@ -81,6 +83,8 @@ func GetDeviceList() (dl []DeviceInfo, e error) {
 
 type Device struct {
 	ctx *C.struct_ftdi_context
+	open bool
+	lock sync.Mutex
 }
 
 func Open(di DeviceInfo) (d *Device, e error) {
@@ -100,11 +104,14 @@ func Open(di DeviceInfo) (d *Device, e error) {
 		return d, getErr(ctx)
 	}
 
-	return &Device{ctx}, nil
+	return &Device{ctx, true, sync.Mutex{}}, nil
 }
 
 func (d *Device) Close() (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	defer C.ftdi_free(d.ctx)
+	d.open = false
 	if ret := C.ftdi_usb_close(d.ctx); ret != 0 {
 		return getErr(d.ctx)
 	}
@@ -116,6 +123,11 @@ func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
 }
 
 func (d *Device) Read(p []byte) (n int, e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if !d.open {
+		return 0, io.EOF;
+	}
 	ret := C.ftdi_read_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p)))
 	if ret < 0 {
 		return 0, getErr(d.ctx)
@@ -124,6 +136,11 @@ func (d *Device) Read(p []byte) (n int, e error) {
 }
 
 func (d *Device) Write(p []byte) (n int, e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if !d.open {
+		return 0, errors.New("FTDI device is already closed");
+	}
 	ret := C.ftdi_write_data(d.ctx, (*C.uchar)(&p[0]), C.int(len(p)))
 	if ret < 0 {
 		return 0, getErr(d.ctx)
@@ -132,6 +149,8 @@ func (d *Device) Write(p []byte) (n int, e error) {
 }
 
 func (d *Device) SetBaudRate(baud uint) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_set_baudrate(d.ctx, C.int(baud)); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -139,6 +158,8 @@ func (d *Device) SetBaudRate(baud uint) (e error) {
 }
 
 func (d *Device) SetChars(event, err byte) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_set_event_char(d.ctx, C.uchar(event), C.uchar(event)); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -149,6 +170,8 @@ func (d *Device) SetChars(event, err byte) (e error) {
 }
 
 func (d *Device) SetBitMode(mode BitMode) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	const mask = 0x00
 	if ret := C.ftdi_set_bitmode(d.ctx, mask, C.uchar(mode)); ret < 0 {
 		return getErr(d.ctx)
@@ -157,6 +180,8 @@ func (d *Device) SetBitMode(mode BitMode) (e error) {
 }
 
 func (d *Device) SetFlowControl(f FlowControl) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_setflowctrl(d.ctx, C.int(f)); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -164,6 +189,8 @@ func (d *Device) SetFlowControl(f FlowControl) (e error) {
 }
 
 func (d *Device) SetLatency(latency int) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_set_latency_timer(d.ctx, C.uchar(latency)); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -171,6 +198,8 @@ func (d *Device) SetLatency(latency int) (e error) {
 }
 
 func (d *Device) SetTransferSize(read_size, write_size int) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_read_data_set_chunksize(d.ctx, C.uint(read_size)); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -181,6 +210,8 @@ func (d *Device) SetTransferSize(read_size, write_size int) (e error) {
 }
 
 func (d *Device) SetLineProperty(props LineProperties) (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_set_line_property(d.ctx,
 		uint32(props.Bits),
 		uint32(props.StopBits),
@@ -196,6 +227,8 @@ func (d *Device) SetTimeout(read_timeout, write_timeout int) (e error) {
 }
 
 func (d *Device) Reset() (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_usb_reset(d.ctx); ret < 0 {
 		return getErr(d.ctx)
 	}
@@ -203,6 +236,8 @@ func (d *Device) Reset() (e error) {
 }
 
 func (d *Device) Purge() (e error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	if ret := C.ftdi_usb_purge_buffers(d.ctx); ret < 0 {
 		return getErr(d.ctx)
 	}
