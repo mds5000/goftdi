@@ -1,4 +1,5 @@
 package ftdi
+// +build linux,cgo
 
 import "errors"
 import "unsafe"
