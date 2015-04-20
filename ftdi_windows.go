@@ -3,6 +3,7 @@ package ftdi
 import "unsafe"
 import "syscall"
 import "bytes"
+import "time"
 
 func bytesToString(b []byte) string {
 	n := bytes.Index(b, []byte{0})
@@ -40,8 +41,8 @@ type DeviceInfo struct {
 	dtype         uint64
 	id            uint64
 	location      uint64
-	serial_number string
-	description   string
+	SerialNumber string
+	Description   string
 	handle        uintptr
 }
 
@@ -69,8 +70,8 @@ func GetDeviceList() (di []DeviceInfo, e error) {
 		if r != 0 {
 			return di, e
 		}
-		d.serial_number = bytesToString(sn[:])
-		d.description = bytesToString(description[:])
+		d.SerialNumber = bytesToString(sn[:])
+		d.Description = bytesToString(description[:])
 
 		di[i] = d
 	}
@@ -109,12 +110,22 @@ func (d Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
 func (d Device) Read(p []byte) (n int, e error) {
 	var bytesRead uint32
 	bytesToRead := uint32(len(p))
+
+    // Bugfix: Only read what's available immediately. On windows, you can't
+    // trust ft_read to block until the requested amount of data is available. 
+    // We also insert a delay to force the read to block for more data...
+    // ugh... crappy FTDI drivers.
+    rx_cnt, _, _, e := d.GetStatus()
+    if bytesToRead > uint32(rx_cnt) {
+        time.Sleep(20*time.Millisecond)
+        bytesToRead = uint32(rx_cnt)
+    }
+
 	ptr := &p[0] //A reference to the first element of the underlying "array"
 	r, _, e := ft_read.Call(uintptr(d),
 		uintptr(unsafe.Pointer(ptr)),
 		uintptr(bytesToRead),
 		uintptr(unsafe.Pointer(&bytesRead)))
-	p = p[:bytesRead]
 	if r == 0 {
 		return int(bytesRead), nil
 	}
